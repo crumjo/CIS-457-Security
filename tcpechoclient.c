@@ -14,16 +14,24 @@ struct thread_args
 	int socket;
 };
 
+int kicked = 0;
+
 void* worker(void* args)
 {
 	struct thread_args targs;
 	memcpy(&targs, args, sizeof(struct thread_args));
 	char receive[5000];
 
-	while(strcmp(receive, "/quit\n") != 0)
+	while(strcmp(receive, "/quit\n") != 0 && strcmp(receive, "kicked\n") != 0)
 	{
 		recv(targs.socket, receive, 5000, 0);
-		printf("\nReceived from server: %s\n", receive);
+		if (strcmp(receive, "kicked\n") == 0) 
+		{
+			printf("You were kicked\n");
+			kicked = 1;
+			exit(0);
+		}
+		printf("%s", receive);
 	}
 
 	return 0;
@@ -82,7 +90,7 @@ int main(int argc, char** argv)
 	pthread_create(&tid, NULL, worker, args);
 	pthread_detach(tid);
 	
-	while (strcmp(send, "/quit\n") != 0)
+	while (strcmp(send, "/quit\n") != 0 && kicked == 0)
 	{
 		printf("\nEnter a string: ");
 		fgets(send, 5000, stdin);
