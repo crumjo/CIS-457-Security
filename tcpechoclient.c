@@ -20,12 +20,12 @@ void* worker(void* args)
 	memcpy(&targs, args, sizeof(struct thread_args));
 	char receive[5000];
 
-	while(strcmp(receive, "quit*\n") != 0)
+	while(strcmp(receive, "/quit\n") != 0)
 	{
 		recv(targs.socket, receive, 5000, 0);
 		printf("\nReceived from server: %s\n", receive);
 	}
-	
+
 	return 0;
 }
 
@@ -71,10 +71,10 @@ int main(int argc, char** argv)
 	char send[5000];
 	char username [100];
 
-	printf("Enter a username");
+	printf("Enter a username: ");
 	fgets(username, 100, stdin);
 	sendto(sockfd, username, 100, 0, (struct sockaddr*)&serveraddr, sizeof(serveraddr));
-
+		
 	struct thread_args *args = malloc(sizeof(struct thread_args));
 	memcpy(&args->socket, &sockfd, sizeof(int));
 
