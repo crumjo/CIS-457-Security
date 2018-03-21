@@ -33,7 +33,7 @@ void* worker(void* args)
 	{
 		strcpy (command, " ");
 		strcpy (text, " ");
-		recv(targs.clientsocket, receive, 5000, 0);
+		if (recv(targs.clientsocket, receive, 5000, 0) < 1) break;
 		strcpy(text, receive); // copy receive in
 		if (strchr(text, ' ')  != NULL)
 		{
@@ -71,14 +71,21 @@ void* worker(void* args)
 		}
 		else if (strcmp(command, "/w") == 0)
 		{
+			int flag = 0;
 			char *dstusername = (char*) malloc(sizeof(char)*100);
 			strcpy (dstusername, strsep(&text, " "));
 			for (int i = 0; i < 1024; i++)
 			{
 				if (strcmp(client_list[i], dstusername) == 0)
 				{
+					flag = 1;
 					send(i, text, sizeof(text), 0);
 				}
+			}
+
+			if (!flag)
+			{
+				send(targs.clientsocket, "no such client", sizeof("no such client"), 0);
 			}
 			free(dstusername);
 		}
@@ -170,16 +177,34 @@ int main(int argc, char **argv)
 		clientsocket = accept(sockfd,(struct sockaddr*)&clientaddr,&len);
 
 		//Receive client username
-		
-		if (recvfrom(clientsocket, username, 100, 0, (struct sockaddr*)&clientaddr,&len) != -1 )
+		int uniqname = 1;
+		do
 		{
-			strcpy(username, strsep(&username, "\n"));
-			strcpy (client_list[clientsocket], username);
-			printf("New Client: %s\n", username);
-		}	
-		else
-			printf("recv error");
-	
+			uniqname = 1;
+			if (recvfrom(clientsocket, username, 100, 0, (struct sockaddr*)&clientaddr,&len) != -1 )
+			{
+				strcpy(username, strsep(&username, "\n"));
+				for (int i = 0; i<1024; i++)
+				{
+					if (strcmp(client_list[i], username) == 0)
+					{
+						uniqname = 0;
+						send(i, &uniqname, sizeof(uniqname), 0);
+						break;
+					}
+				}
+			}	
+			else
+				printf("recv error");
+
+			if (uniqname == 1)
+			{
+				send(clientsocket, &uniqname, sizeof(uniqname), 0);
+				strcpy (client_list[clientsocket], username);
+				printf("New Client: %s\n", username);
+			}
+		} while (uniqname == 0);
+		
 
 		struct thread_args *args = malloc(sizeof(struct thread_args));
 		memcpy(&args->clientsocket, &clientsocket, sizeof(int));

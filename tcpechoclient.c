@@ -78,11 +78,16 @@ int main(int argc, char** argv)
 
 	char send[5000];
 	char username [100];
+	int uniqname = 1;
 
-	printf("Enter a username: ");
-	fgets(username, 100, stdin);
-	sendto(sockfd, username, 100, 0, (struct sockaddr*)&serveraddr, sizeof(serveraddr));
-		
+	do
+	{
+		printf("Enter a username: ");
+		fgets(username, 100, stdin);
+		sendto(sockfd, username, 100, 0, (struct sockaddr*)&serveraddr, sizeof(serveraddr));
+
+	}while (recv(sockfd, &uniqname, sizeof(int), 0) == 0);
+			
 	struct thread_args *args = malloc(sizeof(struct thread_args));
 	memcpy(&args->socket, &sockfd, sizeof(int));
 
