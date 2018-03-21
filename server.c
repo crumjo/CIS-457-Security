@@ -45,9 +45,10 @@ int main(int argc, char **argv)
     signal(SIGINT, sig_handler);
 
     char cp_num[16];
-    char welcome[] = "Welcome to the chat server!\n";
+    char welcome[] = "Welcome to the chat server! You are user ";
     int port, sockfd, new_socket;
     int max_clients = 10;
+    int wlen = strlen(welcome);
     int sockets[max_clients];
     fd_set fds;
 
@@ -121,8 +122,13 @@ int main(int argc, char **argv)
                         }
                     }
 
-                    printf("New connection, sock fd:%d \t ip: %s \t port: %d\n",
+                    printf("New connection:    sock fd: %d \t ip: %s \t  port: %d\n",
                            new_socket, inet_ntoa(clientaddr.sin_addr), ntohs(clientaddr.sin_port));
+
+                    char sock[3];
+                    snprintf(sock, sizeof(sock), "%d", new_socket);
+
+                    memcpy(welcome + wlen, sock, sizeof(sock));
 
                     if ((send(new_socket, welcome, strlen(welcome), 0)) != strlen(welcome))
                     {
@@ -144,12 +150,121 @@ int main(int argc, char **argv)
                 }
                 else
                 {
-                    char line[5000];
+                    char line[5000], line2[5000];
+                    char type[5];
                     recv(i, line, 5000, 0);
-                    printf("Got from client: %s\n", line);
-                    send(i, line, strlen(line) + 1, 0);
+                    memcpy(type, line, 4);
+                    //printf("Type: %s\n", type);
+
+                    /* Broadcast message to all users. */
+                    if (strcmp(type, "cast") == 0)
+                    {
+                        memcpy(line2, line + 4, strlen(line) - 4);
+                        printf("Broadcast message to all users.\n");
+                        for (int l = 0; l < max_clients; l++)
+                        {
+                            if (sockets[l] != 0 || sockets[l] != i)
+                            {
+                                send(l, line2, strlen(line2) + 1, 0);
+                            }
+                        }
+                    }
+
+                    /* Send list to all users. */
+                    else if (strcmp(type, "list") == 0)
+                    {
+                        printf("List requested...\n");
+                        char *list = (char *)malloc(512 * sizeof(char));
+                        strcat(list, "All users on the server:\n");
+                        for (int m = 0; m < max_clients; m++)
+                        {
+                            if (sockets[m] != 0)
+                            {
+                                //printf("Socket: %d", sockets[m]);
+                                char element[3];
+                                snprintf(element, sizeof(element), "%d", sockets[m]);
+                                // printf("Element: %s\n", element);
+                                // printf("Sockets: %d\n", sockets[m]);
+                                // printf("Length: %lu\n", strlen(list));
+                                strcat(list, element);
+                                strcat(list, "\n");
+                            }
+                        }
+                        // printf("List :%s:\n", list);
+                        send(i, list, strlen(list) + 1, 0);
+                        free(list);
+                    }
+
+                    /* Send to a specific user. */
+                    else if (strcmp(type, "user") == 0)
+                    {
+                        printf("Message for user: %s\n", line);
+                        char user[3], msg[5000];
+
+                        memcpy(user, line + 4, 1);
+                        memcpy(msg, line + 6, strlen(line) - 7);
+
+                        int iuser = atoi(user);
+                        printf("Request to send to user %d.\n", iuser);
+                        int found = 0;
+                        for (int n = 0; n < max_clients; n++)
+                        {
+                            if (sockets[n] == iuser)
+                            {
+                                send(iuser, msg, strlen(msg) + 1, 0);
+                                printf("Message sent to user %d.\n", n);
+                                found = 1;
+                                break;
+                            }
+                        }
+
+                        if (found == 0)
+                        {
+                            send(i, "The user could not be found.\n", 23, 0);
+                        }
+                    }
+
+                    /* Admin. */
+                    else if(strcmp(type, "kick") == 0)
+                    {
+                        char password[5], user[3];
+                        
+                        memcpy(user, line + 4, 1);
+                        memcpy(password, line + 6, 4);
+                        
+                        int iuser = atoi(user);
+
+                        /* Verify password. */
+                        if (strcmp(password, "1234") == 0)
+                        {
+                            printf("Admin permission verified.\n");
+                            send(iuser, "", 1, 0);
+                            close(iuser);
+                        }
+                    }
+
+                    /* Somebody disconnected. */
+                    else if (strlen(line) == 0)
+                    {
+                        printf("%d has disconnected.\n", i);
+                        close(i);
+                        for (int o = 0; o < max_clients; o++)
+                        {
+                            if (sockets[o] == i)
+                            {
+                                sockets[o] = 0;
+                                // printf("Removed client %d\n", i);
+                                break;
+                            }
+                        }
+                    }
+
+                    else
+                    {
+                        printf("> From client: %s\n", line);
+                        // send(i, line, strlen(line) + 1, 0);
+                    }
                     // close(i);
-                    // FD_CLR(i, &fds);
                 }
             }
         }

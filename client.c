@@ -18,6 +18,7 @@ int sockfd;
 void sig_handler(int sigNum)
 {
 	printf("\nClosing server socket...\n");
+    send(sockfd, "", 1, 0);
     close(sockfd);
 	exit(0);
 }
@@ -38,7 +39,13 @@ void *recv_msg(void *arg)
         int sockfd = *((int *)arg);
         char line[5000];
         recv(sockfd, line, 5000, 0);
-        printf("\n> From Server: %s\n", line);
+        if (strlen(line) == 0)
+        {
+            printf("You have been kicked.\n");
+            close(sockfd);
+            exit (1);
+        }
+        printf("> %s\n", line);
     }
 
     return arg;
