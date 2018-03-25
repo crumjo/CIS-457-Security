@@ -27,10 +27,23 @@ int decrypt(unsigned char *ciphertext, int ciphertext_len, unsigned char *key,
 
 unsigned char key[32];
 
+struct symmetric_key_msg
+{
+	int encryptedkey_len;
+	unsigned char encrypted_key [256];
+};
+
+struct std_msg
+{
+	int ciphertext_len;
+	unsigned char ciphertext [5000];
+	unsigned char iv[16];
+};
 
 struct thread_args
 {
 	int socket;
+	unsigned char key[32];
 };
 
 int kicked = 0;
@@ -38,12 +51,14 @@ int kicked = 0;
 void* worker(void* args)
 {
 	struct thread_args targs;
+	struct std_msg imsg;
 	memcpy(&targs, args, sizeof(struct thread_args));
 	char receive[5000];
 
 	while(strcmp(receive, "/quit\n") != 0 && strcmp(receive, "kicked\n") != 0)
 	{
-		recv(targs.socket, receive, 5000, 0);
+		recv(targs.socket, &imsg, sizeof(struct std_msg), 0);
+		decrypt(imsg.ciphertext, imsg.ciphertext_len, key, imsg.iv, (unsigned char*)receive);
 		if (strcmp(receive, "kicked\n") == 0) 
 		{
 			printf("You were kicked\n");
@@ -98,21 +113,23 @@ int main(int argc, char** argv)
 	char send[5000];
 	char username [100];
 	int uniqname = 1;
+	struct symmetric_key_msg skmsg;
 
 	ERR_load_crypto_strings();
 	OpenSSL_add_all_algorithms();
 	OPENSSL_config(NULL);
 
-	unsigned char encrypted_key[256];
+  	RAND_bytes(key,32);
 
 	FILE* pubf = fopen("RSApub.pem","rb");
 	EVP_PKEY *pubkey;
   	pubkey = PEM_read_PUBKEY(pubf,NULL,NULL,NULL);
 	
-	unsigned char encrypted_key[256];
-  	int encryptedkey_len = rsa_encrypt(key, 32, pubkey, encrypted_key);
+  	skmsg.encryptedkey_len = rsa_encrypt(key, 32, pubkey, skmsg.encrypted_key);
+	//printf("KEY: %s\n\n", key);
+	//printf("ENCRYPTED KEY: %s\n\n", skmsg.encrypted_key);
 
-	sendto(sockfd, encrypted_key, encryptedkey_len, 0, (struct sockaddr*)&serveraddr, sizeof(serveraddr));
+	sendto(sockfd, &skmsg, sizeof(struct symmetric_key_msg), 0, (struct sockaddr*)&serveraddr, sizeof(serveraddr));
 
 	do
 	{
@@ -124,16 +141,20 @@ int main(int argc, char** argv)
 	
 	struct thread_args *args = malloc(sizeof(struct thread_args));
 	memcpy(&args->socket, &sockfd, sizeof(int));
-
 	pthread_t tid;
 	pthread_create(&tid, NULL, worker, args);
 	pthread_detach(tid);
 	
 	while (strcmp(send, "/quit\n") != 0 && kicked == 0)
 	{
+		struct std_msg smsg;
 		printf("\nEnter a string: ");
 		fgets(send, 5000, stdin);
-		sendto(sockfd, send, 5000, 0, (struct sockaddr*)&serveraddr, sizeof(serveraddr));
+		RAND_pseudo_bytes(smsg.iv,16);
+
+		smsg.ciphertext_len = encrypt((unsigned char*)send, strlen(send), key, smsg.iv, smsg.ciphertext);
+
+		sendto(sockfd, &smsg, sizeof(struct std_msg), 0, (struct sockaddr*)&serveraddr, sizeof(serveraddr));
 		
 		//
 	}

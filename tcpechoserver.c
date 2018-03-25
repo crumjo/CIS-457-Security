@@ -29,9 +29,30 @@ struct thread_args
 	int clientsocket;
 	char username[100];
 	struct sockaddr_in *clientaddr;
+	unsigned char key[32];
 };
 
-char client_list[1024][100];
+struct client_list
+{
+	char username[100];
+	unsigned char client_key[32];
+};
+
+struct symmetric_key_msg
+{
+	int encryptedkey_len;
+	unsigned char encrypted_key [256];
+};
+
+struct std_msg
+{
+	int ciphertext_len;
+	unsigned char ciphertext [5000];
+	unsigned char iv[16];
+};
+
+struct client_list clist[1024];
+
 int adminpassword = 1234;
 
 
@@ -47,9 +68,14 @@ void* worker(void* args)
 
 	while(strcmp(receive, "/quit\n") != 0)
 	{
+		struct std_msg smsg;
 		strcpy (command, " ");
 		strcpy (text, " ");
-		if (recv(targs.clientsocket, receive, 5000, 0) < 1) break;
+		if (recv(targs.clientsocket, &smsg, sizeof(struct std_msg), 0) < 1) break;
+
+		decrypt(smsg.ciphertext, smsg.ciphertext_len, targs.key, smsg.iv, (unsigned char*)receive);
+		printf("Recveived: %s\n\n", receive);
+
 		strcpy(text, receive); // copy receive in
 		if (strchr(text, ' ')  != NULL)
 		{
@@ -69,20 +95,26 @@ void* worker(void* args)
 
 		if (strcmp(command, "/admin") == 0)
 		{
-			char msg[40];
+			unsigned char msg[40];
 			if (atoi(text) == adminpassword)
 			{
 				printf("Admin rights granted to %s\n", targs.username);
-				strcpy(msg, "admin rights granted\n");
+				strcpy((char*)msg, "admin rights granted\n");
+				struct std_msg omsg;
+				RAND_pseudo_bytes(omsg.iv,16);
+				omsg.ciphertext_len = encrypt(msg, strlen((char*)msg), targs.key, omsg.iv, omsg.ciphertext);
+				send (targs.clientsocket, &omsg, sizeof(struct std_msg), 0);
 				admin = 1;
-				send (targs.clientsocket, msg, sizeof(msg), 0);
 			}
 			else
 			{
 				printf("Admin rights not granted to %s\n", targs.username);
-				strcpy(msg, "admin rights denied\n");
+				strcpy((char*)msg, "admin rights denied\n");
 				admin = 0;
-				send (targs.clientsocket, msg, sizeof(msg), 0);
+				struct std_msg omsg;
+				RAND_pseudo_bytes(omsg.iv,16);
+				omsg.ciphertext_len = encrypt(msg, strlen((char*)msg), targs.key, omsg.iv, omsg.ciphertext);
+				send (targs.clientsocket, &omsg, sizeof(struct std_msg), 0);
 			}
 		}
 		else if (strcmp(command, "/w") == 0)
@@ -92,16 +124,26 @@ void* worker(void* args)
 			strcpy (dstusername, strsep(&text, " "));
 			for (int i = 0; i < 1024; i++)
 			{
-				if (strcmp(client_list[i], dstusername) == 0)
+				if (strcmp(clist[i].username, dstusername) == 0)
 				{
 					flag = 1;
-					send(i, text, sizeof(text), 0);
+					struct std_msg omsg;
+					RAND_pseudo_bytes(omsg.iv,16);
+					omsg.ciphertext_len = encrypt((unsigned char*)text, strlen(text), clist[i].client_key,
+												  omsg.iv, omsg.ciphertext);
+					send (i, &omsg, sizeof(struct std_msg), 0);
 				}
 			}
 
 			if (!flag)
 			{
-				send(targs.clientsocket, "no such client", sizeof("no such client"), 0);
+				unsigned char msg [40];
+				strcpy((char*) msg, "no such client");
+				struct std_msg omsg;
+				RAND_pseudo_bytes(omsg.iv,16);
+				omsg.ciphertext_len = encrypt((unsigned char*)msg, strlen((char*)msg), targs.key,
+												omsg.iv, omsg.ciphertext);
+				send (targs.clientsocket, &omsg, sizeof(struct std_msg), 0);
 			}
 			free(dstusername);
 		}
@@ -109,9 +151,13 @@ void* worker(void* args)
 		{
 			for (int i = 0; i < 1024; i++)
 			{
-				if (strcmp(client_list[i], "") != 0 && i != targs.clientsocket)
+				if (strcmp(clist[i].username, "") != 0 && i != targs.clientsocket)
 				{
-					send(i, text, sizeof(text), 0);
+					struct std_msg omsg;
+					RAND_pseudo_bytes(omsg.iv,16);
+					omsg.ciphertext_len = encrypt((unsigned char*)text, strlen(text), clist[i].client_key,
+													omsg.iv, omsg.ciphertext);
+					send(i, &omsg, sizeof(struct std_msg), 0);
 				}
 			}
 		}
@@ -123,18 +169,26 @@ void* worker(void* args)
 			{
 				for (int i = 0; i < 1024; i++)
 				{
-					if (strcmp(client_list[i], text) == 0)
+					if (strcmp(clist[i].username, text) == 0)
 					{
-						printf("Kicking %s\n", client_list[i]);
+						printf("Kicking %s\n", clist[i].username);
 						strcpy(msg, "kicked\n");
-						strcpy(client_list[i], "");
-						send(i, msg, sizeof(msg), 0);
+						strcpy(clist[i].username, "");
+						struct std_msg omsg;
+						RAND_pseudo_bytes(omsg.iv,16);
+						omsg.ciphertext_len = encrypt((unsigned char*)msg, strlen(msg), targs.key,
+														omsg.iv, omsg.ciphertext);
+						send(i, &omsg, sizeof(struct std_msg), 0);
 					}
 				}
 			}
 			strcpy(msg, text);
 			strcat(msg, " was kicked\n");
-			send (targs.clientsocket, msg, sizeof(msg), 0);
+			struct std_msg omsg;
+			RAND_pseudo_bytes(omsg.iv,16);
+			omsg.ciphertext_len = encrypt((unsigned char*)msg, strlen(msg), targs.key,
+											omsg.iv, omsg.ciphertext);
+			send (targs.clientsocket, &omsg, sizeof(struct std_msg), 0);
 		}
 		else if (strcmp(command, "/clientlist") == 0)
 		{
@@ -142,14 +196,18 @@ void* worker(void* args)
 			char msg [1024*100];
 			for (int i = 0; i < 1024; i++)
 			{
-				if (strcmp(client_list[i], "") != 0 && strlen(client_list[i])>1)
+				if (strcmp(clist[i].username, "") != 0 && strlen(clist[i].username)>1)
 				{
-					strcat (msg, client_list[i]);
+					strcat (msg, clist[i].username);
 					strcat (msg, "\n");
 				}
 			}
 			printf("Compiled List:\n%s", msg);
-			sendto (targs.clientsocket, msg, sizeof(msg), 0,(struct sockaddr*)&targs.clientaddr, sizeof(targs.clientaddr));
+			struct std_msg omsg;
+			RAND_pseudo_bytes(omsg.iv,16);
+			omsg.ciphertext_len = encrypt((unsigned char*)msg, strlen(msg), targs.key,
+											omsg.iv, omsg.ciphertext);
+			sendto (targs.clientsocket, &omsg, sizeof(struct std_msg), 0,(struct sockaddr*)&targs.clientaddr, sizeof(targs.clientaddr));
 		}
 	}
 	free(command);
@@ -183,7 +241,7 @@ int main(int argc, char **argv)
 
 	for (int i = 0; i < 1024; i++)
 	{
-		strcpy(client_list[i], "");
+		strcpy(clist[i].username, "");
 	}
 
 	while(1)
@@ -191,6 +249,27 @@ int main(int argc, char **argv)
 
 		socklen_t len = sizeof(clientaddr);
 		clientsocket = accept(sockfd,(struct sockaddr*)&clientaddr,&len);
+
+		ERR_load_crypto_strings();
+		OpenSSL_add_all_algorithms();
+		OPENSSL_config(NULL);
+
+		unsigned char buf[5000];
+		unsigned char decryptedkey [32];
+		struct symmetric_key_msg skmsg;
+
+		FILE* privf = fopen("RSApriv.pem","rb");
+		EVP_PKEY *privkey;
+  		privkey = PEM_read_PrivateKey(privf,NULL,NULL,NULL);
+
+		recvfrom(clientsocket, &buf, sizeof(buf), 0, (struct sockaddr*)&clientaddr,&len);
+		memcpy(&skmsg, buf, sizeof(struct symmetric_key_msg));
+		
+		int decryptedkey_len = rsa_decrypt(skmsg.encrypted_key,skmsg.encryptedkey_len, privkey, decryptedkey);
+		//printf("ENCRYPTED KEY %d: %s\n\n", skmsg.encryptedkey_len,skmsg.encrypted_key);
+		//printf("KEY: %s\n\n", decryptedkey);
+
+		//printf("%s %d\n", decryptedkey, decryptedkey_len);
 
 		//Receive client username
 		int uniqname = 1;
@@ -202,7 +281,7 @@ int main(int argc, char **argv)
 				strcpy(username, strsep(&username, "\n"));
 				for (int i = 0; i<1024; i++)
 				{
-					if (strcmp(client_list[i], username) == 0)
+					if (strcmp(clist[i].username, username) == 0)
 					{
 						uniqname = 0;
 						send(i, &uniqname, sizeof(uniqname), 0);
@@ -216,7 +295,8 @@ int main(int argc, char **argv)
 			if (uniqname == 1)
 			{
 				send(clientsocket, &uniqname, sizeof(uniqname), 0);
-				strcpy (client_list[clientsocket], username);
+				strcpy (clist[clientsocket].username, username);
+				memcpy (clist[clientsocket].client_key, decryptedkey, decryptedkey_len);
 				printf("New Client: %s\n", username);
 			}
 		} while (uniqname == 0);
@@ -225,6 +305,7 @@ int main(int argc, char **argv)
 		struct thread_args *args = malloc(sizeof(struct thread_args));
 		memcpy(&args->clientsocket, &clientsocket, sizeof(int));
 		memcpy(&args->clientaddr, &clientaddr, sizeof(struct sockaddr_in));
+		memcpy(&args->key, decryptedkey, decryptedkey_len);
 		strcpy(args->username, username);
 
 		pthread_t tid;
